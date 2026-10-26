@@ -57,6 +57,11 @@ pub(super) struct Recv {
     /// If push promises are allowed to be received.
     is_push_enabled: bool,
 
+    /// impit fork: while push is disabled, refuse a pushed stream instead of closing the
+    /// connection. Set when the client's SETTINGS left ENABLE_PUSH = 0 out, so the server may
+    /// push (the initial value is 1).
+    refuse_push_promises: bool,
+
     /// If extended connect protocol is enabled.
     is_extended_connect_protocol_enabled: bool,
 }
@@ -107,6 +112,7 @@ impl Recv {
             buffer: Buffer::new(),
             refused: None,
             is_push_enabled: config.local_push_enabled,
+            refuse_push_promises: false,
             is_extended_connect_protocol_enabled: config.extended_connect_protocol_enabled,
         }
     }
@@ -790,6 +796,25 @@ impl Recv {
         stream: &mut store::Ptr,
     ) -> Result<(), Error> {
         stream.state.reserve_remote()?;
+        if self.refuse_push_promises && !self.is_push_enabled {
+            // impit fork: the server may push (ENABLE_PUSH was left out), but h2 has push
+            // disabled. Refuse the promised stream and keep the connection (RFC 9113 §8.4.2).
+            // Frames the server sends on the refused stream are then ignored for the reset-stream
+            // window and answered with RST_STREAM STREAM_CLOSED after it, as for any locally reset
+            // stream. This comes before the checks below, so an oversized or invalid promise is
+            // refused with REFUSED_STREAM too, instead of being reset with PROTOCOL_ERROR (both are
+            // stream errors). Like any library reset, each refusal counts toward the connection's
+            // local-reset limit (`max_local_error_reset_streams`).
+            tracing::debug!(
+                "stream error REFUSED_STREAM -- recv_push_promise: \
+                 push is disabled; promised_id={:?};",
+                frame.promised_id(),
+            );
+            return Err(Error::library_reset(
+                frame.promised_id(),
+                Reason::REFUSED_STREAM,
+            ));
+        }
         if frame.is_over_size() {
             // A frame is over size if the decoded header block was bigger than
             // SETTINGS_MAX_HEADER_LIST_SIZE.
@@ -965,9 +990,15 @@ impl Recv {
         }
     }
 
+    /// impit fork: see `refuse_push_promises`.
+    pub fn set_refuse_push_promises(&mut self) {
+        self.refuse_push_promises = true;
+    }
+
     /// Returns true if the remote peer can reserve a stream with the given ID.
     pub fn ensure_can_reserve(&self) -> Result<(), Error> {
-        if !self.is_push_enabled {
+        // impit fork: with `refuse_push_promises`, `recv_push_promise` refuses the stream instead.
+        if !self.is_push_enabled && !self.refuse_push_promises {
             proto_err!(conn: "recv_push_promise: push is disabled");
             return Err(Error::library_go_away(Reason::PROTOCOL_ERROR));
         }

@@ -14,6 +14,8 @@ pub struct Settings {
     max_frame_size: Option<u32>,
     max_header_list_size: Option<u32>,
     enable_connect_protocol: Option<u32>,
+    // impit fork: SETTINGS_NO_RFC7540_PRIORITIES (RFC 9218), send-only.
+    no_rfc7540_priorities: Option<u32>,
 }
 
 /// An enum that lists all valid settings that can be sent in a SETTINGS
@@ -29,6 +31,7 @@ pub enum Setting {
     MaxFrameSize(u32),
     MaxHeaderListSize(u32),
     EnableConnectProtocol(u32),
+    NoRfc7540Priorities(u32),
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Default)]
@@ -107,6 +110,22 @@ impl Settings {
 
     pub fn set_enable_push(&mut self, enable: bool) {
         self.enable_push = Some(enable as u32);
+    }
+
+    /// impit fork: leaves ENABLE_PUSH out (see `impit_settings`).
+    pub(crate) fn clear_enable_push(&mut self) {
+        self.enable_push = None;
+    }
+
+    /// impit fork: SETTINGS_NO_RFC7540_PRIORITIES (id 9). Only the tests read it.
+    #[cfg(test)]
+    pub(crate) fn no_rfc7540_priorities(&self) -> Option<u32> {
+        self.no_rfc7540_priorities
+    }
+
+    /// impit fork: SETTINGS_NO_RFC7540_PRIORITIES (id 9), sent but never parsed.
+    pub(crate) fn set_no_rfc7540_priorities(&mut self, val: Option<u32>) {
+        self.no_rfc7540_priorities = val;
     }
 
     pub fn is_extended_connect_protocol_enabled(&self) -> Option<bool> {
@@ -197,7 +216,8 @@ impl Settings {
                         return Err(Error::InvalidSettingValue);
                     }
                 },
-                None => {}
+                // `from_id` doesn't map 9: a received setting 9 is ignored.
+                Some(NoRfc7540Priorities(_)) | None => {}
             }
         }
 
@@ -256,6 +276,10 @@ impl Settings {
         if let Some(v) = self.enable_connect_protocol {
             f(EnableConnectProtocol(v));
         }
+
+        if let Some(v) = self.no_rfc7540_priorities {
+            f(NoRfc7540Priorities(v));
+        }
     }
 }
 
@@ -291,6 +315,9 @@ impl fmt::Debug for Settings {
             }
             Setting::EnableConnectProtocol(v) => {
                 builder.field("enable_connect_protocol", &v);
+            }
+            Setting::NoRfc7540Priorities(v) => {
+                builder.field("no_rfc7540_priorities", &v);
             }
         });
 
@@ -347,6 +374,7 @@ impl Setting {
             MaxFrameSize(v) => (5, v),
             MaxHeaderListSize(v) => (6, v),
             EnableConnectProtocol(v) => (8, v),
+            NoRfc7540Priorities(v) => (9, v),
         };
 
         dst.put_u16(kind);

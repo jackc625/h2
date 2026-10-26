@@ -118,6 +118,13 @@ where
         }
     }
 
+    /// impit fork: while push is disabled, refuse pushed streams instead of closing the
+    /// connection.
+    pub fn refuse_push_promises(&self) {
+        let mut me = self.inner.lock().unwrap();
+        me.actions.recv.set_refuse_push_promises();
+    }
+
     pub fn set_target_connection_window_size(&mut self, size: WindowSize) -> Result<(), Reason> {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;

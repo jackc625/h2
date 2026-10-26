@@ -109,6 +109,7 @@ macro_rules! ready {
 mod codec;
 mod error;
 mod hpack;
+mod impit_settings;
 
 #[cfg(not(feature = "unstable"))]
 mod proto;

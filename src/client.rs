@@ -1319,10 +1319,11 @@ where
             codec.set_max_recv_header_list_size(max as usize);
         }
 
-        // Send initial settings frame
-        codec
-            .buffer(builder.settings.clone().into())
-            .expect("invalid SETTINGS frame");
+        // Send initial settings frame (impit fork: the IMPIT_H2_* env vars
+        // can change this copy, never `builder.settings`)
+        let wire = crate::impit_settings::wire_settings_from_env(&builder.settings);
+        let refuse_push_promises = crate::impit_settings::push_left_out(&builder.settings, &wire);
+        codec.buffer(wire.into()).expect("invalid SETTINGS frame");
 
         let inner = proto::Connection::new(
             codec,
@@ -1337,6 +1338,11 @@ where
                 settings: builder.settings.clone(),
             },
         );
+        // impit fork: with ENABLE_PUSH left out, the server may push (the
+        // initial value is 1) although h2 has push disabled
+        if refuse_push_promises {
+            inner.streams().refuse_push_promises();
+        }
         let send_request = SendRequest {
             inner: inner.streams().clone(),
             pending: None,
